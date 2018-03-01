@@ -1,0 +1,2 @@
+uint8 num_measurements
+float64 position_quality
