@@ -11,12 +11,12 @@ catkin_python_setup()
 
 add_message_files(
     FILES
-    EstimatorStatus.msg
+    CalibratorStatus.msg
 )
 
 add_service_files(
     FILES
-    EstimateParams.srv
+    Calibrate.srv
 )
 
 generate_messages(

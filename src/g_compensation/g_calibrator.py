@@ -16,6 +16,9 @@ from g_compensation.srv import EstimateParams, EstimateParamsResponse
 
 from g_compensator import tf2_buffer, mean_wrench, wrench_msg_to_kdl, wrench_kdl_to_msg, init_transform, get_frame
 
+class ParamEstimator:
+
+
 
 if __name__ == '__main__':
     rospy.init_node('param_estimator', anonymous=True)

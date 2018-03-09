@@ -1,0 +1,20 @@
+<library path="src">
+  <class name="Calibrator Plugin" type="g_compensation.g_calibrator.Calibrator" base_class_type="rqt_gui_py::Plugin">
+    <description>
+      A Python GUI plugin to calibrate the g_compensator's parameters.
+    </description>
+    <qtgui>
+      <!-- optional grouping...
+      <group>
+        <label>Group</label>
+      </group>
+      <group>
+        <label>Subgroup</label>
+      </group>
+      -->
+      <label>g_compensator calibration</label>
+      <icon type="theme">system-help</icon>
+      <statustip>A Python GUI plugin to calibrate the g_compensator's parameters.</statustip>
+    </qtgui>
+  </class>
+</library>

@@ -5,6 +5,7 @@
   <description>Gravity compensation for FT-sensors.</description>
 
   <maintainer email="phg@ipa.fhg.de">Philipp Gorczak</maintainer>
+  <maintainer email="pgt@ipa.fhg.de">Philipp Tenbrock</maintainer>
 
   <license>TODO</license>
 
@@ -23,6 +24,7 @@
   <run_depend>tf2_ros</run_depend>
 
   <export>
+    <rqt_gui plugin="${prefix}/plugin.xml"/>
   </export>
 
 </package>
