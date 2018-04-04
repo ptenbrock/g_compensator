@@ -135,11 +135,11 @@ if __name__ == '__main__':
                     T_d_total = np.vstack((T_d_total, T_d))
                     f_d_total = np.hstack((f_d_total, f_d))
 
-            (l,_,rank_l,_) = np.linalg.lstsq(A_l_total, b_l_total, rcond=None)
+            (l,_,rank_l,_) = np.linalg.lstsq(A_l_total, b_l_total)
             print 'rank(l): ', rank_l
             print 'l: ', l
 
-            (f_g,_,_,_) = np.linalg.lstsq(T_d_total, f_d_total, rcond=None)
+            (f_g,_,_,_) = np.linalg.lstsq(T_d_total, f_d_total)
             if np.linalg.norm(f_g) > 0:
                 relevance_of_m = f_g[2]/np.linalg.norm(f_g)
             else:
