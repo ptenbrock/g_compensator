@@ -1,3 +1,4 @@
 ---
 float64 mass
-float64 goodness_of_fit
+float64[3] lever
+float64 quality_of_fit

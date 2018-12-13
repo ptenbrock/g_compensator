@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 import collections
 import threading
-#
+
 import rospy
 import numpy as np
 import PyKDL as kdl
@@ -10,109 +10,99 @@ import tf2_ros
 import tf_conversions
 
 import geometry_msgs.msg as geometry_msgs
-from std_srvs.srv import Empty, EmptyResponse
-from g_compensation.msg import EstimatorStatus
-from g_compensation.srv import EstimateParams, EstimateParamsResponse
 
 from g_compensator import tf2_buffer, mean_wrench, wrench_msg_to_kdl, wrench_kdl_to_msg, init_transform, get_frame
 
-class ParamEstimator:
 
+class Calibrator:
+    def __init__(self, wrench_topic, quality_of_pos_callback, gravity_frame='world'):
+        # start filling the tf buffer
+        self.tf2_listener = tf2_ros.TransformListener(tf2_buffer)
+        self.broadcaster = tf2_ros.StaticTransformBroadcaster()
 
+        # tare
+        self.wrench_buffer = collections.deque(maxlen=50)
+        self.measurements = []
+        self.transformations = []
+        self.direction_vectors = []
 
-if __name__ == '__main__':
-    rospy.init_node('param_estimator', anonymous=True)
+        self.force_frame = None
+        self.tf_ready = False
+        self.run_add_measurement = threading.Event()
 
-    pub = rospy.Publisher('estimator_status', EstimatorStatus, queue_size=1)
+        self.quality_of_pos_callback = quality_of_pos_callback
 
-    # start filling the tf buffer
-    tf2_listener = tf2_ros.TransformListener(tf2_buffer)
-    broadcaster = tf2_ros.StaticTransformBroadcaster()
+        # sync data access
+        data_sync = threading.Lock()
 
-    # get parameters
-    gravity_frame = rospy.get_param('~gravity_frame', 'world')
-    wrench_topic = rospy.get_param('~wrench_topic', 'wrench')
+        rospy.Subscriber(wrench_topic, geometry_msgs.WrenchStamped, lambda msg: self.wrench_cb(msg), queue_size=1)
 
-    namespace = rospy.get_param('~namespace', '')
-    if namespace and not namespace.endswith('/'):
-        namespace = namespace + '/'
+    def add_measurement(self):
+        while not self.tf_ready:
+            rospy.sleep(0.1)
+        with data_sync:
+            self.run_add_measurement.set()
 
-    wrench_topic = namespace + wrench_topic
+    def reset_measurements(self):
+        with data_sync:
+            self.measurements = []
+            self.transformations = []
+            self.direction_vectors = []
 
-    # tare
-    wrench_buffer = collections.deque(maxlen=50)
-    measurements = []
-    transformations = []
-    direction_vectors = []
-    force_frame = None
-    run_add_measurement = threading.Event()
-
-    # sync services
-    service_sync = threading.Lock()
-    tf_ready = False
-
-    def wrench_cb(msg):
-        global force_frame, tf_ready
-
+    def wrench_cb(self, msg):
         time = rospy.Time(0)  # alternative: msg.header.stamp
-        force_frame = msg.header.frame_id
+        self.force_frame = msg.header.frame_id
 
         # get transforms: gravity -> sensor
         try:
             tf_S_B = get_frame(force_frame, gravity_frame, time)
-            tf_ready = True
+            self.tf_ready = True
         except tf2.TransformException as e:
             rospy.logerr(e)
             init_transform(force_frame, gravity_frame)
             return
 
         # low pass filter wrench
-        wrench_buffer.append( wrench_msg_to_kdl(msg) )
+        self.wrench_buffer.append( wrench_msg_to_kdl(msg) )
 
         # add new measurement
         if run_add_measurement.is_set():
-            measurements.append( mean_wrench(wrench_buffer) )
-            transformations.append(tf_S_B)
-            # transform z axis of current sensor frame to stationary frame
-            direction_vectors.append(np.fromiter(tf_S_B.Inverse() * kdl.Vector(0, 0, 1), np.float, 3))
+            self.append_measurement(tf_S_B)
             run_add_measurement.clear()
             rospy.loginfo("Added measurement")
 
-        # publish num of measurements and quality of current position
+        quality_of_position = self.get_quality_of_position(tf_S_B)
+        self.quality_of_pos_callback(len(self.measurements), quality_of_position)
+
+    def append_measurement(self, tf_S_B):
+        self.measurements.append( mean_wrench(self.wrench_buffer) )
+        self.transformations.append(tf_S_B)
+        # transform z axis of current sensor frame to stationary frame
+        self.direction_vectors.append(np.fromiter(tf_S_B.Inverse() * kdl.Vector(0, 0, 1), np.float, 3))
+
+    def get_quality_of_position(self, tf_S_B):
+        # determine num of measurements and quality of current position
         # current z-axis of sensor frame in stationary coordinates
         current_z_axis = (np.fromiter(tf_S_B.Inverse() * kdl.Vector(0, 0, 1), np.float, 3))
         min_diff_angle = np.Inf
-        for former_z_axis in direction_vectors:
-            diff_angle = np.arccos( (np.dot(current_z_axis, former_z_axis)) / (np.linalg.norm(current_z_axis) * np.linalg.norm(former_z_axis)) )
-            if diff_angle < min_diff_angle:
-                min_diff_angle = diff_angle
+
+        with data_sync:
+            for former_z_axis in self.direction_vectors:
+                diff_angle = np.arccos( (np.dot(current_z_axis, former_z_axis)) / (np.linalg.norm(current_z_axis) * np.linalg.norm(former_z_axis)) )
+                if diff_angle < min_diff_angle:
+                    min_diff_angle = diff_angle
         # bad for angle < 45deg(pi/4), good for angle > 80deg(pi/2*8/9), lin between
         quality_of_position = 1.0/(np.pi/2*8/9 - np.pi/4) * (min_diff_angle - np.pi/4)# linear part
         quality_of_position = np.min([np.max([0, min_diff_angle]), 1.0])
-        pub.publish(EstimatorStatus(len(measurements), quality_of_position))
+        return quality_of_position
 
-    def add_measurement(req):
+    def calibrate(self):
         while not tf_ready:
             rospy.sleep(0.1)
-        with service_sync:
-            rospy.sleep(0.5) # let the low pass filter do its work
-            run_add_measurement.set()
-            return EmptyResponse()
-
-    def reset_measurements(req):
-        while not tf_ready:
-            rospy.sleep(0.1)
-        with service_sync:
-            measurements = []
-            transformations = []
-            return EmptyResponse()
-
-    def estimate_params(req):
-        while not tf_ready:
-            rospy.sleep(0.1)
-        with service_sync:
-            m = np.NaN
-            goodness_of_fit = np.NaN
+        with data_sync:
+            mass = None
+            lever = None
+            quality_of_fit = None
             if len(measurements) >= 1:
 
                 def get_values_from_measurements(meas1, trafo1, meas2=None, trafo2=None):
@@ -150,33 +140,33 @@ if __name__ == '__main__':
                         T_d_total = np.vstack((T_d_total, T_d))
                         f_d_total = np.hstack((f_d_total, f_d))
 
-                (l,_,rank_l,_) = np.linalg.lstsq(A_l_total, b_l_total)
-                print 'rank(l): ', rank_l
-                print 'l: ', l
+                (lever,_,rank_l,_) = np.linalg.lstsq(A_l_total, b_l_total)
+                # print 'rank(lever): ', rank_l
+                # print 'lever: ', lever
 
                 (f_g,_,_,_) = np.linalg.lstsq(T_d_total, f_d_total)
                 if np.linalg.norm(f_g) > 0:
-                    relevance_of_m = np.abs(f_g[2])/np.linalg.norm(f_g)
+                    quality_of_mass = np.abs(f_g[2])/np.linalg.norm(f_g)
                 else:
-                    relevance_of_m = 0.0
-                print 'relevance(m): ', relevance_of_m
-                m = - f_g[2] / 9.81
-                print 'm: ', m
+                    quality_of_mass = 0.0
+                # print 'quality(mass): ', quality_of_mass
+                mass = - f_g[2] / 9.81
+                # print 'mass: ', mass
 
                 if rank_l < 3:
-                    goodness_of_fit = 0.0
+                    quality_of_fit = 0.0
                 else:
-                    goodness_of_fit = relevance_of_m
+                    quality_of_fit = quality_of_mass
 
                 static_transformStamped = geometry_msgs.TransformStamped()
 
                 static_transformStamped.header.stamp = rospy.Time.now()
                 static_transformStamped.header.frame_id = force_frame
-                static_transformStamped.child_frame_id = 'estimated_com_frame'
+                static_transformStamped.child_frame_id = 'calibrated_com_frame'
 
-                static_transformStamped.transform.translation.x = float(l[0])
-                static_transformStamped.transform.translation.y = float(l[1])
-                static_transformStamped.transform.translation.z = float(l[2])
+                static_transformStamped.transform.translation.x = float(lever[0])
+                static_transformStamped.transform.translation.y = float(lever[1])
+                static_transformStamped.transform.translation.z = float(lever[2])
 
                 static_transformStamped.transform.rotation.x = float(0)
                 static_transformStamped.transform.rotation.y = float(0)
@@ -185,16 +175,4 @@ if __name__ == '__main__':
 
                 broadcaster.sendTransform(static_transformStamped)
 
-            return EstimateParamsResponse( m, goodness_of_fit)
-
-    # pubs'n'subs
-    rospy.Subscriber(wrench_topic, geometry_msgs.WrenchStamped, wrench_cb, queue_size=1)
-    rospy.Service('add_measurement', Empty, add_measurement)
-    rospy.Service('reset_measurements', Empty, reset_measurements)
-    rospy.Service('estimate_params', EstimateParams, estimate_params)
-
-    # run
-    rospy.loginfo("Running parameter estimator")
-    rospy.spin()
-
-    rospy.loginfo("Shutting down parameter estimator")
+            return (mass, lever, quality_of_fit)
