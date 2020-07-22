@@ -27,24 +27,25 @@ class Calibrator:
         self.direction_vectors = []
 
         self.force_frame = None
+        self.gravity_frame = gravity_frame
         self.tf_ready = False
         self.run_add_measurement = threading.Event()
 
         self.quality_of_pos_callback = quality_of_pos_callback
 
         # sync data access
-        data_sync = threading.Lock()
+        self.data_sync = threading.Lock()
 
         rospy.Subscriber(wrench_topic, geometry_msgs.WrenchStamped, lambda msg: self.wrench_cb(msg), queue_size=1)
 
     def add_measurement(self):
         while not self.tf_ready:
             rospy.sleep(0.1)
-        with data_sync:
+        with self.data_sync:
             self.run_add_measurement.set()
 
     def reset_measurements(self):
-        with data_sync:
+        with self.data_sync:
             self.measurements = []
             self.transformations = []
             self.direction_vectors = []
@@ -55,20 +56,20 @@ class Calibrator:
 
         # get transforms: gravity -> sensor
         try:
-            tf_S_B = get_frame(force_frame, gravity_frame, time)
+            tf_S_B = get_frame(self.force_frame, self.gravity_frame, time)
             self.tf_ready = True
         except tf2.TransformException as e:
             rospy.logerr(e)
-            init_transform(force_frame, gravity_frame)
+            init_transform(self.force_frame, self.gravity_frame)
             return
 
         # low pass filter wrench
         self.wrench_buffer.append( wrench_msg_to_kdl(msg) )
 
         # add new measurement
-        if run_add_measurement.is_set():
+        if self.run_add_measurement.is_set():
             self.append_measurement(tf_S_B)
-            run_add_measurement.clear()
+            self.run_add_measurement.clear()
             rospy.loginfo("Added measurement")
 
         quality_of_position = self.get_quality_of_position(tf_S_B)
@@ -86,7 +87,7 @@ class Calibrator:
         current_z_axis = (np.fromiter(tf_S_B.Inverse() * kdl.Vector(0, 0, 1), np.float, 3))
         min_diff_angle = np.Inf
 
-        with data_sync:
+        with self.data_sync:
             for former_z_axis in self.direction_vectors:
                 diff_angle = np.arccos( (np.dot(current_z_axis, former_z_axis)) / (np.linalg.norm(current_z_axis) * np.linalg.norm(former_z_axis)) )
                 if diff_angle < min_diff_angle:
@@ -97,13 +98,13 @@ class Calibrator:
         return quality_of_position
 
     def calibrate(self):
-        while not tf_ready:
+        while not self.tf_ready:
             rospy.sleep(0.1)
-        with data_sync:
+        with self.data_sync:
             mass = None
             lever = None
             quality_of_fit = None
-            if len(measurements) >= 1:
+            if len(self.measurements) >= 1:
 
                 def get_values_from_measurements(meas1, trafo1, meas2=None, trafo2=None):
                     f_d = meas1.force
@@ -127,12 +128,12 @@ class Calibrator:
                 T_d_total = np.zeros((0,3))
                 f_d_total = np.zeros((0))
 
-                if len(measurements) == 1:
-                    (A_l_total, b_l_total, T_d_total, f_d_total) = get_values_from_measurements(measurements[0], transformations[0])
+                if len(self.measurements) == 1:
+                    (A_l_total, b_l_total, T_d_total, f_d_total) = get_values_from_measurements(self.measurements[0], self.transformations[0])
 
-                if len(measurements) >= 2:
-                    for i in range(1,len(measurements)):
-                        (A_l, b_l, T_d, f_d) = get_values_from_measurements(measurements[i-1], transformations[i-1], measurements[i], transformations[i])
+                if len(self.measurements) >= 2:
+                    for i in range(1,len(self.measurements)):
+                        (A_l, b_l, T_d, f_d) = get_values_from_measurements(self.measurements[i-1], self.transformations[i-1], self.measurements[i], self.transformations[i])
 
                         A_l_total = np.vstack((A_l_total, A_l))
                         b_l_total = np.hstack((b_l_total, b_l))
@@ -161,7 +162,7 @@ class Calibrator:
                 static_transformStamped = geometry_msgs.TransformStamped()
 
                 static_transformStamped.header.stamp = rospy.Time.now()
-                static_transformStamped.header.frame_id = force_frame
+                static_transformStamped.header.frame_id = self.force_frame
                 static_transformStamped.child_frame_id = 'calibrated_com_frame'
 
                 static_transformStamped.transform.translation.x = float(lever[0])
@@ -173,6 +174,6 @@ class Calibrator:
                 static_transformStamped.transform.rotation.z = float(0)
                 static_transformStamped.transform.rotation.w = float(1)
 
-                broadcaster.sendTransform(static_transformStamped)
+                self.broadcaster.sendTransform(static_transformStamped)
 
             return (mass, lever, quality_of_fit)
