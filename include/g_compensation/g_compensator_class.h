@@ -12,6 +12,9 @@
 
 #include <deque>
 #include <atomic>
+#include <memory>
+
+#include "low_pass_fir_filter.h"
 
 class GCompensator
 {
@@ -60,6 +63,13 @@ public:
             buffer_size_ = 50; //default value
             ROS_WARN("Continuing with default buffer_size '50'.");
         };
+
+        std::size_t filter_window;
+        if (rosparam_shortcuts::get("g_compensator", n_static_params, "filter_window", filter_window))
+        {
+            low_pass_filter_ = std::make_unique<LowPassFIRFilter>(filter_window);
+            ROS_INFO_STREAM("Using low pass filter with filter window " << filter_window);
+        }
     }
 
     bool getTransform(const std::string &target, const std::string &source, KDL::Frame &transform)
@@ -105,8 +115,16 @@ public:
             //     gravity_at_sensor = tf_com * gravity_at_com
             gravity_at_sensor_ = tf_com_ * gravity_at_com_;
 
-            //     # compensate
+            // convert to KDL
             tf::wrenchMsgToKDL(msg->wrench, message_wrench_);
+
+            // low pass filter (if configured)
+            if (low_pass_filter_) {
+                low_pass_filter_->push_measurement(message_wrench_);
+                message_wrench_ = low_pass_filter_->get_current_mean();
+            }
+
+            // compensate
             compensated_ = message_wrench_ - gravity_at_sensor_;
 
             if (last_updated_row_ >= buffer_size_)
@@ -187,4 +205,6 @@ private:
     KDL::Wrench message_wrench_;
     KDL::Wrench compensated_;
     geometry_msgs::WrenchStamped compensated_msg_;
+
+    std::unique_ptr<LowPassFIRFilter> low_pass_filter_;
 };
