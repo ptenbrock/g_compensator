@@ -2,24 +2,13 @@
 
 <launch>
 
-        <!-- Gravity compensation - python version (legacy) -->
-        <node name="g_compensation_python" pkg="g_compensation" type="g_compensator.py">
-            <rosparam>
-                com_frame: tool
-                gravity_frame: base_link
-                mass: 1.266
-            </rosparam>
-        </node>
-
         <!-- Gravity compensation - cpp version -->
-        <node name="g_compensation_cpp" pkg="g_compensation" type="g_compensator">
+        <node name="g_compensator" pkg="g_compensation" type="g_compensator">
             <rosparam>
                 com_frame: tool
                 gravity_frame: base_link
                 mass: 1.266
             </rosparam>
-            <remap from="wrench_compensated" to="wrench_compensated_cpp"/>
-            <remap from="tare" to="tare_cpp" />
         </node>
 
 </launch>

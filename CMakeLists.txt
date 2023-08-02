@@ -20,7 +20,10 @@ include_directories(
   ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(g_compensator src/g_compensation/g_compensator.cpp)
+add_executable(g_compensator
+  src/g_compensator.cpp
+  src/g_compensator_class.cpp
+)
 
 ## Specify libraries to link a library or executable target against
 target_link_libraries(g_compensator

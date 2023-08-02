@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<package format="2">
+<package format="3">
   <name>g_compensation</name>
   <version>0.0.0</version>
   <description>Gravity compensation for FT-sensors.</description>
@@ -11,10 +11,9 @@
   <buildtool_depend>catkin</buildtool_depend>
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
-  <exec_depend>python_orocos_kdl</exec_depend>
-  <exec_depend>rospy</exec_depend>
+  <exec_depend condition="$ROS_DISTRO == melodic">python_orocos_kdl</exec_depend>
+  <exec_depend condition="$ROS_DISTRO == noetic">python3-pykdl</exec_depend>
   <exec_depend>tf2_kdl</exec_depend>
-  <exec_depend>tf2_py</exec_depend>
 
   <depend>roscpp</depend>
   <depend>tf2</depend>
